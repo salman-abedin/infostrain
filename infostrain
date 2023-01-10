@@ -1,0 +1,79 @@
+#!/bin/sh
+#
+# infostrain: Automates the process of
+#             setting up conditional PPTP VPN routing
+#             for GNU/Linux users of DSi
+
+_restart_networkmanager() {
+    echo ╔════════════════════════════════════════
+    echo ║ Restarting NetworkManager
+    echo ╚════════════════════════════════════════
+
+    profile_name=$1
+    systemctl restart NetworkManager 2>/dev/null
+    sv restart NetworkManager 2>/dev/null # For runit users
+    sleep 10
+    nmcli conn up "$profile_name"
+}
+
+setup_filters() {
+    echo ╔════════════════════════════════════════
+    echo ║ Setting up filters
+    echo ╚════════════════════════════════════════
+
+    profile_name=$1
+    network_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
+    sed -i \
+        "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$network_gateway" \
+        /etc/NetworkManager/system-connections/"$profile_name".nmconnection
+    _restart_networkmanager "$profile_name"
+}
+
+initiate_profile() {
+    echo ╔════════════════════════════════════════
+    echo ║ Initiating NetworkManager profile
+    echo ╚════════════════════════════════════════
+
+    profile_name=$1
+    profile_path=/etc/NetworkManager/system-connections/$profile_name.nmconnection
+
+    echo gateway?
+    read -r gateway
+    echo username?
+    read -r username
+
+    stty -echo
+    echo password?
+    read -r password
+    stty echo
+
+    cat <<eof >"$profile_path"
+[connection]
+id=$profile_name
+type=vpn
+
+[vpn]
+gateway=$gateway
+password-flags=0
+user=$username
+service-type=org.freedesktop.NetworkManager.pptp
+
+[vpn-secrets]
+password=$password
+
+[ipv4]
+dns=10.1.0.26;
+method=auto
+eof
+
+    chmod u=rw,g=,o= "$profile_path"
+    _restart_networkmanager "$profile_name"
+}
+
+main() {
+    profile_name=infostrain
+
+    initiate_profile "$profile_name"
+    setup_filters "$profile_name"
+}
+main
