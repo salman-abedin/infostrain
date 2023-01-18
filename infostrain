@@ -13,7 +13,8 @@ _restart_networkmanager() {
     systemctl restart NetworkManager 2>/dev/null
     sv restart NetworkManager 2>/dev/null # For runit users
     sleep 10
-    nmcli conn up "$profile_name"
+    nmcli conn up "${profile_name}_dynamic"
+    nmcli conn up "${profile_name}_vpn"
 }
 
 setup_filters() {
@@ -22,20 +23,33 @@ setup_filters() {
     echo ╚════════════════════════════════════════
 
     profile_name=$1
+    profile_path_vpn=/etc/NetworkManager/system-connections/${profile_name}_vpn.nmconnection
+    profile_path_static=/etc/NetworkManager/system-connections/${profile_name}_static.nmconnection
+
+
     network_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
     sed -i \
         "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$network_gateway" \
-        /etc/NetworkManager/system-connections/"$profile_name".nmconnection
+        "$profile_path_vpn"
+
+
+    private_ip=$(ip a | grep 'inet.* ppp.*' | awk '{print $2}')
+    sed -i \
+        "/\[ipv4\]/aaddress1=$private_ip/24,$network_gateway" \
+        "$profile_path_static"
+
     _restart_networkmanager "$profile_name"
 }
 
-initiate_profile() {
+initiate_profiles() {
     echo ╔════════════════════════════════════════
     echo ║ Initiating NetworkManager profile
     echo ╚════════════════════════════════════════
 
     profile_name=$1
-    profile_path=/etc/NetworkManager/system-connections/$profile_name.nmconnection
+    profile_path_vpn=/etc/NetworkManager/system-connections/${profile_name}_vpn.nmconnection
+    profile_path_dynamic=/etc/NetworkManager/system-connections/${profile_name}_dynamic.nmconnection
+    profile_path_static=/etc/NetworkManager/system-connections/${profile_name}_static.nmconnection
 
     echo gateway?
     read -r gateway
@@ -47,9 +61,9 @@ initiate_profile() {
     read -r password
     stty echo
 
-    cat <<eof >"$profile_path"
+    cat <<eof >"$profile_path_vpn"
 [connection]
-id=$profile_name
+id=${profile_name}_vpn
 type=vpn
 
 [vpn]
@@ -66,14 +80,34 @@ dns=10.1.0.26;
 method=auto
 eof
 
-    chmod u=rw,g=,o= "$profile_path"
+    cat <<eof >"$profile_path_dynamic"
+[connection]
+id=${profile_name}_dynamic
+type=ethernet
+eof
+
+
+    cat <<eof >"$profile_path_static"
+[connection]
+id=${profile_name}_static
+type=ethernet
+
+[ipv4]
+method=manual
+dns=10.1.0.26;
+eof
+
+    chmod u=rw,g=,o= \
+        "$profile_path_vpn" \
+        "$profile_path_dynamic" \
+        "$profile_path_static"
     _restart_networkmanager "$profile_name"
 }
 
 main() {
     profile_name=infostrain
 
-    initiate_profile "$profile_name"
+    initiate_profiles "$profile_name"
     setup_filters "$profile_name"
 }
 main
