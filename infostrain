@@ -9,12 +9,11 @@ _restart_networkmanager() {
     echo ║ Restarting NetworkManager
     echo ╚════════════════════════════════════════
 
-    profile_name=$1
     systemctl restart NetworkManager 2>/dev/null
     sv restart NetworkManager 2>/dev/null # For runit users
     sleep 10
-    nmcli conn up "${profile_name}_dynamic"
-    nmcli conn up "${profile_name}_vpn"
+    nmcli conn up "infostrain_dynamic"
+    nmcli conn up "infostrain_vpn"
 }
 
 setup_filters() {
@@ -22,23 +21,45 @@ setup_filters() {
     echo ║ Setting up filters
     echo ╚════════════════════════════════════════
 
-    profile_name=$1
-    profile_path_vpn=/etc/NetworkManager/system-connections/${profile_name}_vpn.nmconnection
-    profile_path_static=/etc/NetworkManager/system-connections/${profile_name}_static.nmconnection
+    profile_path_vpn=/etc/NetworkManager/system-connections/infostrain_vpn.nmconnection
+    profile_path_static=/etc/NetworkManager/system-connections/infostrain_static.nmconnection
 
-
-    network_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
+    dynamic_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
     sed -i \
-        "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$network_gateway" \
+        "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$dynamic_gateway" \
         "$profile_path_vpn"
 
-
     private_ip=$(ip a | grep 'inet.* ppp.*' | awk '{print $2}')
+    static_gateway=10.1.0.1
     sed -i \
-        "/\[ipv4\]/aaddress1=$private_ip/24,$network_gateway" \
+        "/\[ipv4\]/aaddress1=${private_ip}/24,${static_gateway}" \
         "$profile_path_static"
 
-    _restart_networkmanager "$profile_name"
+    _restart_networkmanager
+}
+
+setup_aliases() {
+    echo ╔════════════════════════════════════════
+    echo ║ Setting up aliases
+    echo ╚════════════════════════════════════════
+    os_user=$(logname)
+
+    cat <<eof >/home/"$os_user"/.bashrc_infostrain
+vu(){
+    sudo nmcli con up infostrain_dynamic 2> /dev/null
+    sudo nmcli con up infostrain_vpn
+}
+
+vd(){
+    sudo nmcli con down infostrain_vpn
+    sudo nmcli con up infostrain_static 2> /dev/null
+}
+eof
+
+    cat <<eof >>/home/"$os_user"/.bashrc
+. .bashrc_infostrain 2> /dev/null
+eof
+
 }
 
 initiate_profiles() {
@@ -46,10 +67,9 @@ initiate_profiles() {
     echo ║ Initiating NetworkManager profile
     echo ╚════════════════════════════════════════
 
-    profile_name=$1
-    profile_path_vpn=/etc/NetworkManager/system-connections/${profile_name}_vpn.nmconnection
-    profile_path_dynamic=/etc/NetworkManager/system-connections/${profile_name}_dynamic.nmconnection
-    profile_path_static=/etc/NetworkManager/system-connections/${profile_name}_static.nmconnection
+    profile_path_vpn=/etc/NetworkManager/system-connections/infostrain_vpn.nmconnection
+    profile_path_dynamic=/etc/NetworkManager/system-connections/infostrain_dynamic.nmconnection
+    profile_path_static=/etc/NetworkManager/system-connections/infostrain_static.nmconnection
 
     echo gateway?
     read -r gateway
@@ -63,7 +83,7 @@ initiate_profiles() {
 
     cat <<eof >"$profile_path_vpn"
 [connection]
-id=${profile_name}_vpn
+id=infostrain_vpn
 type=vpn
 
 [vpn]
@@ -82,32 +102,30 @@ eof
 
     cat <<eof >"$profile_path_dynamic"
 [connection]
-id=${profile_name}_dynamic
+id=infostrain_dynamic
 type=ethernet
 eof
 
-
     cat <<eof >"$profile_path_static"
 [connection]
-id=${profile_name}_static
+id=infostrain_static
 type=ethernet
 
 [ipv4]
-method=manual
 dns=10.1.0.26;
+method=manual
 eof
 
     chmod u=rw,g=,o= \
         "$profile_path_vpn" \
         "$profile_path_dynamic" \
         "$profile_path_static"
-    _restart_networkmanager "$profile_name"
+    _restart_networkmanager
 }
 
 main() {
-    profile_name=infostrain
-
-    initiate_profiles "$profile_name"
-    setup_filters "$profile_name"
+    initiate_profiles
+    setup_filters
+    setup_aliases
 }
 main
