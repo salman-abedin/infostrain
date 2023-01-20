@@ -26,12 +26,10 @@ setup_filters() {
     profile_path_vpn=/etc/NetworkManager/system-connections/${profile_name}_vpn.nmconnection
     profile_path_static=/etc/NetworkManager/system-connections/${profile_name}_static.nmconnection
 
-
     network_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
     sed -i \
         "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$network_gateway" \
         "$profile_path_vpn"
-
 
     private_ip=$(ip a | grep 'inet.* ppp.*' | awk '{print $2}')
     sed -i \
@@ -40,6 +38,24 @@ setup_filters() {
 
     _restart_networkmanager "$profile_name"
 }
+
+setup_aliases() {
+    profile_name=$1
+
+    echo OS user Name?
+    read -r username
+
+    cat <<eof > /home/$username/.bashrc
+vu(){
+    sudo nmcli con up ${profile_name}_dynamic 2> /dev/null
+    sudo nmcli con up ${profile_name}_vpn
+}
+
+vd(){
+    sudo nmcli con down ${profile_name}_vpn
+    sudo nmcli con up ${profile_name}_static 2> /dev/null
+}
+eof
 
 initiate_profiles() {
     echo ╔════════════════════════════════════════
@@ -86,7 +102,6 @@ id=${profile_name}_dynamic
 type=ethernet
 eof
 
-
     cat <<eof >"$profile_path_static"
 [connection]
 id=${profile_name}_static
@@ -109,5 +124,6 @@ main() {
 
     initiate_profiles "$profile_name"
     setup_filters "$profile_name"
+    setup_aliases "$profile_name"
 }
 main
