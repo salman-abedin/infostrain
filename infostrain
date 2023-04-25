@@ -26,7 +26,7 @@ setup_filters() {
 
     dynamic_gateway=$(ip r | grep -Po '.*(?= dev ppp)' | tail -1)
     sed -i \
-        "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$dynamic_gateway" \
+        "/\[ipv4\]/aignore-auto-routes=true\nroute1=10.0.0.0/8,$dynamic_gateway\nroute2=172.16.50.5/32,$dynamic_gateway" \
         "$profile_path_vpn"
 
     private_ip=$(ip a | grep 'inet.* ppp.*' | awk '{print $2}')
